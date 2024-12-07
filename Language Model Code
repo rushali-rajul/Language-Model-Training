@@ -1,0 +1,73 @@
+# Author: Rushali Rajul
+# Pipeline for training a language model from scratch using custom_dataset.txt
+
+import os
+import torch
+from torch.utils.data import Dataset, DataLoader
+from transformers import AutoTokenizer, AutoModelForCausalLM, AdamW, get_scheduler
+
+# Step 1: Prepare Custom Dataset
+class CustomTextDataset(Dataset):
+    def __init__(self, file_path, tokenizer, block_size=128):
+        # Read and preprocess the custom dataset
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        self.tokenizer = tokenizer
+        self.examples = tokenizer(text, truncation=True, max_length=block_size, 
+                                  padding="max_length", return_tensors="pt")["input_ids"]
+    
+    def __len__(self):
+        return len(self.examples)
+    
+    def __getitem__(self, idx):
+        return self.examples[idx]
+
+# Step 2: Define Training Parameters
+def train_language_model(dataset_path, model_name="gpt2", epochs=3, batch_size=8, lr=5e-5):
+    # Load pretrained tokenizer and model
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    
+    # Load the dataset
+    dataset = CustomTextDataset(dataset_path, tokenizer)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    # Define optimizer and scheduler
+    optimizer = AdamW(model.parameters(), lr=lr)
+    num_training_steps = epochs * len(dataloader)
+    scheduler = get_scheduler("linear", optimizer=optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
+
+    # Use GPU if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # Training Loop
+    model.train()
+    for epoch in range(epochs):
+        for step, batch in enumerate(dataloader):
+            batch = batch.to(device)
+            outputs = model(input_ids=batch, labels=batch)
+            loss = outputs.loss
+            loss.backward()
+
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+
+            if step % 10 == 0:
+                print(f"Epoch: {epoch}, Step: {step}, Loss: {loss.item()}")
+
+    # Save the trained model and tokenizer
+    model.save_pretrained("./trained_model")
+    tokenizer.save_pretrained("./trained_model")
+    print("Model training completed and saved.")
+
+# Step 3: Run the Training Pipeline
+if __name__ == "__main__":
+    dataset_path = "custom_dataset.txt"  # Path to custom_dataset.txt
+    if not os.path.exists(dataset_path):
+        print("Dataset not found! Please provide a valid custom_dataset.txt file.")
+    else:
+        train_language_model(dataset_path)
+
+# Script by Rushali Rajul
